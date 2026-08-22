@@ -3,7 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, CartesianGrid,
 } from "recharts";
-import { Plus, TrendingUp, TrendingDown, Coins, Wallet, Trash2, X } from "lucide-react";
+import { Plus, TrendingUp, TrendingDown, Coins, Wallet, Trash2, X, CreditCard } from "lucide-react";
 
 const COLORS = {
   bg: "#11161d",
@@ -17,17 +17,22 @@ const COLORS = {
   expense: "#C1553D",
   income: "#4FA88B",
   invest: "#C9A24B",
+  debt: "#B4794E",
   silver: "#9BA6B0",
 };
 
-const EXPENSE_CATS = ["Ăn uống", "Di chuyển", "Nhà ở", "Hóa đơn", "Mua sắm", "Giải trí", "Sức khỏe", "Giáo dục", "Khác"];
-const INCOME_CATS = ["Lương", "Thưởng", "Freelance", "Kinh doanh", "Khác"];
-const INVEST_CATS = ["Vàng", "Bạc", "Chứng chỉ quỹ", "Bất động sản", "Khác"];
+const EXPENSE_CATS = ["Ăn uống", "Di chuyển", "Nhà ở", "Hóa đơn", "Mua sắm", "Giải trí", "Sức khỏe", "Giáo dục", "Mua mẫu (sản phẩm review)", "Chi phí sản xuất nội dung", "Trả lương", "Khác"];
+const INCOME_CATS = ["Hoa hồng affiliate", "Phí UGC/Booking"];
+const INVEST_CATS = ["Vàng", "Bạc", "Chứng chỉ quỹ", "Khác"];
+const DEBT_CATS = ["Trả nợ thẻ tín dụng", "Trả góp nội thất", "Trả góp khác"];
+const PAYMENT_METHODS = ["Tiền mặt", "Chuyển khoản", "Thẻ tín dụng"];
+const CHANNELS = ["Bộ trưởng", "Bé ong", "Mèo mun", "Chocopie"];
 
 const TYPE_META = {
   expense: { label: "Chi tiêu", color: COLORS.expense, cats: EXPENSE_CATS, sign: -1 },
   income: { label: "Thu nhập", color: COLORS.income, cats: INCOME_CATS, sign: 1 },
   invest: { label: "Đầu tư", color: COLORS.invest, cats: INVEST_CATS, sign: -1 },
+  debt: { label: "Trả nợ/Góp", color: COLORS.debt, cats: DEBT_CATS, sign: -1 },
 };
 
 function fmt(n) {
@@ -47,7 +52,15 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [filter, setFilter] = useState("all");
   const [formOpen, setFormOpen] = useState(false);
-  const [form, setForm] = useState({ type: "expense", category: EXPENSE_CATS[0], amount: "", note: "", date: todayStr() });
+  const [form, setForm] = useState({
+    type: "expense",
+    category: EXPENSE_CATS[0],
+    amount: "",
+    note: "",
+    date: todayStr(),
+    payment: PAYMENT_METHODS[0],
+    channel: CHANNELS[0],
+  });
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -78,7 +91,15 @@ export default function App() {
     const next = [t, ...transactions];
     setTransactions(next);
     persist(next);
-    setForm({ type: form.type, category: TYPE_META[form.type].cats[0], amount: "", note: "", date: todayStr() });
+    setForm((f) => ({
+      type: f.type,
+      category: TYPE_META[f.type].cats[0],
+      amount: "",
+      note: "",
+      date: todayStr(),
+      payment: PAYMENT_METHODS[0],
+      channel: CHANNELS[0],
+    }));
     setError("");
     setFormOpen(false);
   };
@@ -90,13 +111,22 @@ export default function App() {
   };
 
   const totals = useMemo(() => {
-    let income = 0, expense = 0, invest = 0;
+    let income = 0, expenseCash = 0, expenseCard = 0, invest = 0, debtPayments = 0, cardRepaid = 0;
     transactions.forEach((t) => {
       if (t.type === "income") income += t.amount;
-      else if (t.type === "expense") expense += t.amount;
-      else if (t.type === "invest") invest += t.amount;
+      else if (t.type === "expense") {
+        if (t.payment === "Thẻ tín dụng") expenseCard += t.amount;
+        else expenseCash += t.amount;
+      } else if (t.type === "invest") invest += t.amount;
+      else if (t.type === "debt") {
+        debtPayments += t.amount;
+        if (t.category === "Trả nợ thẻ tín dụng") cardRepaid += t.amount;
+      }
     });
-    return { income, expense, invest, balance: income - expense - invest };
+    const expense = expenseCash + expenseCard;
+    const balance = income - expenseCash - invest - debtPayments;
+    const cardOutstanding = expenseCard - cardRepaid;
+    return { income, expense, expenseCash, expenseCard, invest, debtPayments, balance, cardOutstanding };
   }, [transactions]);
 
   const filtered = useMemo(() => {
@@ -108,7 +138,7 @@ export default function App() {
     const map = {};
     transactions.forEach((t) => {
       const k = monthKey(t.date || todayStr());
-      if (!map[k]) map[k] = { month: k, income: 0, expense: 0, invest: 0 };
+      if (!map[k]) map[k] = { month: k, income: 0, expense: 0, invest: 0, debt: 0 };
       map[k][t.type] += t.amount;
     });
     return Object.values(map).sort((a, b) => a.month.localeCompare(b.month)).slice(-6);
@@ -118,6 +148,15 @@ export default function App() {
     const map = {};
     transactions.filter((t) => t.type === "expense").forEach((t) => {
       map[t.category] = (map[t.category] || 0) + t.amount;
+    });
+    return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  }, [transactions]);
+
+  const incomeByChannel = useMemo(() => {
+    const map = {};
+    transactions.filter((t) => t.type === "income").forEach((t) => {
+      const k = t.channel || "Khác";
+      map[k] = (map[k] || 0) + t.amount;
     });
     return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [transactions]);
@@ -163,27 +202,34 @@ export default function App() {
           <div className="serif" style={{ fontSize: 34, fontWeight: 600, marginTop: 4, color: totals.balance < 0 ? COLORS.expense : COLORS.ink }}>
             {fmt(totals.balance)}
           </div>
-          <div className="flex gap-4 mt-4 pt-4" style={{ borderTop: `1px dashed ${COLORS.line}` }}>
-            <div className="flex-1">
+          <div className="flex gap-4 mt-4 pt-4 flex-wrap" style={{ borderTop: `1px dashed ${COLORS.line}` }}>
+            <div style={{ minWidth: 70 }}>
               <div className="flex items-center gap-1" style={{ color: COLORS.income }}>
                 <TrendingUp size={13} />
                 <span className="mono" style={{ fontSize: 11 }}>THU</span>
               </div>
               <div className="mono" style={{ fontSize: 15, marginTop: 2 }}>{fmt(totals.income)}</div>
             </div>
-            <div className="flex-1">
+            <div style={{ minWidth: 70 }}>
               <div className="flex items-center gap-1" style={{ color: COLORS.expense }}>
                 <TrendingDown size={13} />
                 <span className="mono" style={{ fontSize: 11 }}>CHI</span>
               </div>
               <div className="mono" style={{ fontSize: 15, marginTop: 2 }}>{fmt(totals.expense)}</div>
             </div>
-            <div className="flex-1">
+            <div style={{ minWidth: 70 }}>
               <div className="flex items-center gap-1" style={{ color: COLORS.gold }}>
                 <Coins size={13} />
                 <span className="mono" style={{ fontSize: 11 }}>TÍCH LŨY</span>
               </div>
               <div className="mono" style={{ fontSize: 15, marginTop: 2 }}>{fmt(totals.invest)}</div>
+            </div>
+            <div style={{ minWidth: 70 }}>
+              <div className="flex items-center gap-1" style={{ color: COLORS.debt }}>
+                <CreditCard size={13} />
+                <span className="mono" style={{ fontSize: 11 }}>DƯ NỢ THẺ</span>
+              </div>
+              <div className="mono" style={{ fontSize: 15, marginTop: 2 }}>{fmt(totals.cardOutstanding)}</div>
             </div>
           </div>
         </div>
@@ -207,6 +253,7 @@ export default function App() {
                 <Bar dataKey="income" fill={COLORS.income} radius={[3, 3, 0, 0]} />
                 <Bar dataKey="expense" fill={COLORS.expense} radius={[3, 3, 0, 0]} />
                 <Bar dataKey="invest" fill={COLORS.gold} radius={[3, 3, 0, 0]} />
+                <Bar dataKey="debt" fill={COLORS.debt} radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -234,12 +281,27 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {incomeByChannel.length > 0 && (
+            <div className="rounded-xl p-4" style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
+              <div className="mono" style={{ fontSize: 11, color: COLORS.inkDim, letterSpacing: "0.08em", marginBottom: 8 }}>THU NHẬP THEO KÊNH</div>
+              <div className="flex flex-col gap-1.5">
+                {incomeByChannel.map((e, i) => (
+                  <div key={e.name} className="flex items-center gap-2">
+                    <div style={{ width: 8, height: 8, borderRadius: 2, background: pieColors[i % pieColors.length] }} />
+                    <div className="mono" style={{ fontSize: 11.5, color: COLORS.inkDim, flex: 1 }}>{e.name}</div>
+                    <div className="mono" style={{ fontSize: 12.5, color: COLORS.income }}>{fmt(e.value)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* Filter tabs */}
-      <div className="px-5 pt-5 flex gap-2">
-        {[["all", "Tất cả", COLORS.inkDim], ["expense", "Chi tiêu", COLORS.expense], ["income", "Thu nhập", COLORS.income], ["invest", "Đầu tư", COLORS.gold]].map(([key, label, color]) => (
+      <div className="px-5 pt-5 flex gap-2 flex-wrap">
+        {[["all", "Tất cả", COLORS.inkDim], ["expense", "Chi tiêu", COLORS.expense], ["income", "Thu nhập", COLORS.income], ["invest", "Đầu tư", COLORS.gold], ["debt", "Trả nợ/Góp", COLORS.debt]].map(([key, label, color]) => (
           <button
             key={key}
             onClick={() => setFilter(key)}
@@ -266,6 +328,12 @@ export default function App() {
           <div className="rounded-xl overflow-hidden mt-1" style={{ border: `1px solid ${COLORS.line}` }}>
             {filtered.map((t, idx) => {
               const meta = TYPE_META[t.type];
+              const subLine = [
+                t.date,
+                t.type === "expense" && t.payment ? t.payment : null,
+                t.type === "income" && t.channel ? t.channel : null,
+                t.note || null,
+              ].filter(Boolean).join(" · ");
               return (
                 <div
                   key={t.id}
@@ -279,7 +347,7 @@ export default function App() {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 500 }}>{t.category}</div>
                     <div className="mono" style={{ fontSize: 10.5, color: COLORS.inkDim, marginTop: 1 }}>
-                      {t.date}{t.note ? " · " + t.note : ""}
+                      {subLine}
                     </div>
                   </div>
                   <div className="leader" />
@@ -311,21 +379,22 @@ export default function App() {
           <div
             onClick={(e) => e.stopPropagation()}
             className="w-full rounded-t-2xl p-5"
-            style={{ maxWidth: 480, background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderBottom: "none" }}
+            style={{ maxWidth: 480, background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderBottom: "none", maxHeight: "88vh", overflowY: "auto" }}
           >
             <div className="flex items-center justify-between mb-4">
               <div className="serif" style={{ fontSize: 18, fontWeight: 600 }}>Ghi khoản mới</div>
               <button onClick={() => setFormOpen(false)} style={{ color: COLORS.inkDim }}><X size={18} /></button>
             </div>
 
-            <div className="flex gap-2 mb-4">
+            <div className="flex gap-2 mb-4 flex-wrap">
               {Object.entries(TYPE_META).map(([key, meta]) => (
                 <button
                   key={key}
                   onClick={() => setForm((f) => ({ ...f, type: key, category: meta.cats[0] }))}
-                  className="flex-1 py-2 rounded-lg mono"
+                  className="py-2 px-2 rounded-lg mono"
                   style={{
                     fontSize: 12,
+                    flex: "1 1 auto",
                     border: `1px solid ${form.type === key ? meta.color : COLORS.line}`,
                     background: form.type === key ? meta.color + "22" : "transparent",
                     color: form.type === key ? meta.color : COLORS.inkDim,
@@ -359,6 +428,39 @@ export default function App() {
                 {TYPE_META[form.type].cats.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
+
+            {form.type === "expense" && (
+              <div className="mb-3">
+                <div className="mono" style={{ fontSize: 10.5, color: COLORS.inkDim, marginBottom: 4 }}>PHƯƠNG THỨC THANH TOÁN</div>
+                <select
+                  value={form.payment}
+                  onChange={(e) => setForm((f) => ({ ...f, payment: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-lg"
+                  style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.ink, fontSize: 13.5 }}
+                >
+                  {PAYMENT_METHODS.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+                {form.payment === "Thẻ tín dụng" && (
+                  <div className="mono" style={{ fontSize: 10.5, color: COLORS.debt, marginTop: 4 }}>
+                    Khoản này sẽ cộng vào "Dư nợ thẻ", chưa trừ số dư tiền mặt. Khi trả nợ, ghi ở mục "Trả nợ/Góp".
+                  </div>
+                )}
+              </div>
+            )}
+
+            {form.type === "income" && (
+              <div className="mb-3">
+                <div className="mono" style={{ fontSize: 10.5, color: COLORS.inkDim, marginBottom: 4 }}>KÊNH</div>
+                <select
+                  value={form.channel}
+                  onChange={(e) => setForm((f) => ({ ...f, channel: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-lg"
+                  style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.ink, fontSize: 13.5 }}
+                >
+                  {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            )}
 
             <div className="flex gap-3 mb-3">
               <div className="flex-1">
