@@ -161,6 +161,7 @@ function MainApp({ user }) {
   const [selectedMonth, setSelectedMonth] = useState(todayStr().slice(0, 7));
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState(null);
   const [form, setForm] = useState({
     type: "expense",
     category: EXPENSE_CATS[0],
@@ -313,6 +314,13 @@ function MainApp({ user }) {
     [monthTransactions, selectedDay]
   );
 
+  const selectedCategoryTransactions = useMemo(
+    () => (selectedCategory
+      ? monthTransactions.filter((t) => t.type === "expense" && t.category === selectedCategory).sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+      : []),
+    [monthTransactions, selectedCategory]
+  );
+
   if (!loaded) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.inkDim, minHeight: "100vh" }} className="flex items-center justify-center font-mono text-sm">
@@ -425,9 +433,14 @@ function MainApp({ user }) {
               </ResponsiveContainer>
               <div className="flex-1 flex flex-col gap-1.5">
                 {expenseByCat.slice(0, 6).map((e, i) => (
-                  <div key={e.name} className="flex items-center gap-2">
+                  <div
+                    key={e.name}
+                    onClick={(ev) => { ev.stopPropagation(); setSelectedCategory(e.name); }}
+                    className="flex items-center gap-2"
+                    style={{ cursor: "pointer" }}
+                  >
                     <div style={{ width: 8, height: 8, borderRadius: 2, background: pieColors[i % pieColors.length] }} />
-                    <div className="mono" style={{ fontSize: 11, color: COLORS.inkDim, flex: 1 }}>{e.name}</div>
+                    <div className="mono" style={{ fontSize: 11, color: COLORS.inkDim, flex: 1, textDecoration: "underline", textDecorationColor: COLORS.line }}>{e.name}</div>
                     <div className="mono" style={{ fontSize: 11 }}>{fmt(e.value)}</div>
                   </div>
                 ))}
@@ -774,6 +787,47 @@ function MainApp({ user }) {
                   })
                 )}
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Category detail modal */}
+      {selectedCategory && (
+        <div className="fixed inset-0 z-50 flex flex-col" style={{ background: COLORS.bg }}>
+          <div className="flex items-center justify-between px-5 pt-6 pb-4" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+            <div>
+              <div className="serif" style={{ fontSize: 18, fontWeight: 600 }}>{selectedCategory}</div>
+              <div className="mono" style={{ fontSize: 11, color: COLORS.inkDim, marginTop: 2 }}>{monthLabel} · {fmt(selectedCategoryTransactions.reduce((s, t) => s + t.amount, 0))}</div>
+            </div>
+            <button onClick={() => setSelectedCategory(null)} style={{ color: COLORS.inkDim }}><X size={20} /></button>
+          </div>
+
+          <div className="overflow-y-auto" style={{ flex: 1 }}>
+            {selectedCategoryTransactions.length === 0 ? (
+              <div className="p-8 text-center mono" style={{ color: COLORS.inkDim, fontSize: 12 }}>
+                Không có khoản nào trong danh mục này.
+              </div>
+            ) : (
+              selectedCategoryTransactions.map((t, idx) => (
+                <div
+                  key={t.id}
+                  className="flex items-center px-5 py-3"
+                  style={{
+                    background: idx % 2 === 0 ? COLORS.panel : COLORS.panel2,
+                    borderBottom: idx === selectedCategoryTransactions.length - 1 ? "none" : `1px solid ${COLORS.line}`,
+                  }}
+                >
+                  <div style={{ width: 3, height: 28, background: COLORS.expense, borderRadius: 2, marginRight: 12 }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="mono" style={{ fontSize: 12.5, color: COLORS.inkDim }}>{t.date}{t.payment ? " · " + t.payment : ""}</div>
+                    {t.note && <div style={{ fontSize: 13.5, marginTop: 2 }}>{t.note}</div>}
+                  </div>
+                  <div className="mono" style={{ fontSize: 14, color: COLORS.expense, whiteSpace: "nowrap" }}>
+                    −{fmt(t.amount)}
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>
